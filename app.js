@@ -78,6 +78,8 @@
     const newFilter = $("newFilter");
     const newFilterGroup = $("newFilterGroup");
     const newFilterLabel = $("newFilterLabel");
+    const kidsFilter = $("kidsFilter");
+    const kidsFilterGroup = $("kidsFilterGroup");
     const vegFilter = $("vegFilter");
     const favFilter = $("favFilter");
     const michelinFilter = $("michelinFilter");
@@ -144,6 +146,10 @@
 
     function isNewThisSeason(r) {
         return !!(r && r.new_this_season === true);
+    }
+
+    function isKidsMenu(r) {
+        return !!(r && r.kids_menu === true);
     }
 
     // Some source menus SHOUT their dish names in all caps. Title-case those for
@@ -386,6 +392,9 @@
         if (newFilterGroup) {
             newFilterGroup.hidden = !restaurants.some(isNewThisSeason);
         }
+        if (kidsFilterGroup) {
+            kidsFilterGroup.hidden = !restaurants.some(isKidsMenu);
+        }
         populateFilters();
         renderCuisineChips();
         renderStatsBanner();
@@ -407,6 +416,7 @@
         const vegCount = restaurants.filter((r) => hasVegOption(r.Lunch) || hasVegOption(r.Dinner)).length;
         const bookableCount = restaurants.filter(isBookable).length;
         const newCount = restaurants.filter(isNewThisSeason).length;
+        const kidsCount = restaurants.filter(isKidsMenu).length;
 
         const fmt = (n) => `$${Math.round(n)}`;
         const parts = [
@@ -415,6 +425,7 @@
         if (lunchPrices.length) parts.push(statHTML(`${fmt(Math.min(...lunchPrices))}–${fmt(Math.max(...lunchPrices))}`, "Lunch"));
         if (dinnerPrices.length) parts.push(statHTML(`${fmt(Math.min(...dinnerPrices))}–${fmt(Math.max(...dinnerPrices))}`, "Dinner"));
         if (newCount) parts.push(statHTML(newCount, "✨ New", "new"));
+        if (kidsCount) parts.push(statHTML(kidsCount, "🧒 Kids menu", "kids"));
         parts.push(statHTML(vegCount, "Veg-friendly", "veg"));
         parts.push(statHTML(bookableCount, "Bookable", "bookable"));
         if (seasonMeta && (seasonMeta.dates_label || (seasonMeta.dates_start && seasonMeta.dates_end))) {
@@ -434,7 +445,7 @@
         return `<span${interactive}><strong>${escapeHtml(String(value))}</strong><span class="stat-label">${escapeHtml(label)}</span></span>`;
     }
 
-    const STAT_FILTERS = { new: () => newFilter, veg: () => vegFilter, bookable: () => bookableFilter };
+    const STAT_FILTERS = { new: () => newFilter, kids: () => kidsFilter, veg: () => vegFilter, bookable: () => bookableFilter };
     function handleStatActivate(e) {
         const stat = e.target.closest(".stat-clickable");
         if (!stat) return;
@@ -601,6 +612,7 @@
         if (params.has("hood")) neighbourhoodFilter.value = params.get("hood");
         if (params.has("price")) priceFilter.value = params.get("price");
         if (params.get("new") === "1") newFilter.checked = true;
+        if (params.get("kids") === "1") kidsFilter.checked = true;
         if (params.get("veg") === "1") vegFilter.checked = true;
         if (params.get("fav") === "1") favFilter.checked = true;
         if (params.get("michelin") === "1") michelinFilter.checked = true;
@@ -629,6 +641,7 @@
         if (neighbourhoodFilter.value) params.set("hood", neighbourhoodFilter.value);
         if (priceFilter.value) params.set("price", priceFilter.value);
         if (newFilter.checked) params.set("new", "1");
+        if (kidsFilter.checked) params.set("kids", "1");
         if (vegFilter.checked) params.set("veg", "1");
         if (favFilter.checked) params.set("fav", "1");
         if (michelinFilter.checked) params.set("michelin", "1");
@@ -725,7 +738,7 @@
         appendOptions(neighbourhoodFilter, sortedHoods);
         appendOptions(priceFilter, sortedPrices);
 
-        [searchInput, cuisineFilter, neighbourhoodFilter, priceFilter, newFilter, vegFilter, favFilter,
+        [searchInput, cuisineFilter, neighbourhoodFilter, priceFilter, newFilter, kidsFilter, vegFilter, favFilter,
          michelinFilter, lunchFilter, dinnerFilter, bookableFilter, sortBy]
             .forEach((el) => el.addEventListener(el === searchInput ? "input" : "change", filterRestaurants));
 
@@ -826,6 +839,7 @@
             neighbourhoodFilter.value ||
             priceFilter.value ||
             newFilter.checked ||
+            kidsFilter.checked ||
             vegFilter.checked ||
             favFilter.checked ||
             michelinFilter.checked ||
@@ -842,6 +856,7 @@
         neighbourhoodFilter.value = "";
         priceFilter.value = "";
         newFilter.checked = false;
+        kidsFilter.checked = false;
         vegFilter.checked = false;
         favFilter.checked = false;
         michelinFilter.checked = false;
@@ -905,6 +920,7 @@
                 if (!target || target.price !== pVal) return false;
             }
             if (newFilter.checked && !isNewThisSeason(r)) return false;
+            if (kidsFilter.checked && !isKidsMenu(r)) return false;
             if (onlyVeg && !hasVegOption(r.Lunch) && !hasVegOption(r.Dinner)) return false;
             if (onlyFav && !favorites.has(r.id)) return false;
             if (onlyMichelin && !isMichelin(r)) return false;
@@ -996,6 +1012,7 @@
         // row carries only the meaningful flags.
         const badges = [];
         if (isNewThisSeason(r)) badges.push(`<span class="badge new-season" title="New to this festival">✨ New</span>`);
+        if (isKidsMenu(r)) badges.push(`<span class="badge kids" title="Has a kids/children's menu (not part of the Summerlicious deal)">🧒 Kids menu</span>`);
         if (r.__dist != null) badges.push(`<span class="badge distance" title="From your location">📏 ${escapeHtml(formatDistance(r.__dist))}</span>`);
         if (isMichelin(r)) badges.push(`<span class="badge michelin">⭐ Michelin</span>`);
         if (r.accessible_opt === "Yes") badges.push(`<span class="badge access" title="Wheelchair accessible">♿ Accessible</span>`);
@@ -1197,6 +1214,7 @@
         const badges = [];
         const ai = r.ai || {};
         if (isNewThisSeason(r)) badges.push(`<span class="badge new-season" title="New to this festival">✨ New</span>`);
+        if (isKidsMenu(r)) badges.push(`<span class="badge kids" title="Has a kids/children's menu (not part of the Summerlicious deal)">🧒 Kids menu</span>`);
         if (isMichelin(r)) badges.push(`<span class="badge michelin">⭐ Michelin</span>`);
         if (r.accessible_opt === "Yes") badges.push(`<span class="badge access">♿ Accessible</span>`);
         if (r.hotel_name) badges.push(`<span class="badge hotel">🏨 ${escapeHtml(r.hotel_name)}</span>`);

@@ -5524,7 +5524,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:24:01.827276+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"e2aefd15c4e35738d8bcf91d05834f4e450bf178045f3ff0ed3747deb9f707c8\"",
@@ -6461,7 +6462,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:24:22.336370+00:00"
     },
-    "new_this_season": true
+    "new_this_season": true,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"2dee48eb8d0aa2045c7db3e7bfcde0187491a365b326c3bd61eb9bfb90457802\"",
@@ -18607,7 +18609,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T19:44:14.269001+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"f2689252677e3ebc1975d643a053893730357af5d26d998b87dceed53f31b3ad\"",
@@ -24390,7 +24393,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:30:11.859430+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"f94cbb5fd76ef50253b911b14a4809c284f6185d5fcd7d2ee2cf85fe1d06a844\"",
@@ -27652,7 +27656,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:31:10.254269+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"bf723c5c1c60dcffcf6c587eba48aa40527bc4a2f5355eeafc20324226b99271\"",
@@ -34280,7 +34285,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:33:09.304314+00:00"
     },
-    "new_this_season": true
+    "new_this_season": true,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"74d893bd3bf59d1aba2770993f0cc82c004a643a22e89c492b9ea90172d09530\"",
@@ -38799,7 +38805,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:34:36.940705+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"dbc1f53943067e5e1e0cce2f49d35f675b2740f4e0361529621958e2f022f4bc\"",
@@ -45530,7 +45537,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:36:52.613447+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"467ada67363087327a3ec891139147b8550c566fcf8225e401bd13842c5d3f20\"",
@@ -46033,7 +46041,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:37:02.733279+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"96631ff0a9dca813431f66b3a0edb34bd0f8895cf29706bcdea60c6d4a54ca27\"",
@@ -46331,7 +46340,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:37:07.428134+00:00"
     },
-    "new_this_season": true
+    "new_this_season": true,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"905fe2bf1b5a1491c26cd206755ad7a0a90f86cceb65507af416cf3fca5c817d\"",
@@ -48037,7 +48047,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T16:37:43.209602+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"c7f22bd9a6a61c210c0a775d45d784e39ba80a1008bf4427fb0bd70171631b91\"",
@@ -50848,7 +50859,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T19:26:27.297276+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"31c8a891a926c211b47ca85c17c621e304ef8e8ca2dd906a244e2974adfc74b3\"",
@@ -56791,7 +56803,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T19:28:32.439481+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"4952b00a96117279297e31315efee0f142482af3092b6fcca2193c6ec156e747\"",
@@ -60889,7 +60902,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T19:29:52.011435+00:00"
     },
-    "new_this_season": false
+    "new_this_season": false,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"f2fca3926bdedf48313bc4b4e46283954e6ff428fec5c0db5baaa841fef06844\"",
@@ -63720,7 +63734,8 @@
       "model": "qwen2.5:7b",
       "generated_at": "2026-06-16T19:30:53.027971+00:00"
     },
-    "new_this_season": true
+    "new_this_season": true,
+    "kids_menu": true
   },
   {
     "@odata.etag": "W/\"fa38bd9edc5a6920991dce432a4eb7775edb22d40370812e2fdc9a2d432016c8\"",

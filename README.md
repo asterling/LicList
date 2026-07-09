@@ -117,6 +117,19 @@ Runtimes on Apple Silicon for the full 240-restaurant sweep:
 
 The frontend reads `ai.*` fields if present and falls back gracefully if they're missing, so enrichment is always optional.
 
+## Kids-menu tags (optional, local scrape)
+
+`kids_menu.py` flags restaurants that appear to offer a kids'/children's menu — **not** part of the Summerlicious deal, but handy for parents. It drives a headless Chromium (Playwright) to render each restaurant's website (most menus are JavaScript-rendered), follows a couple of menu/kids links, and looks for phrases like "kids menu", "children's menu", "bambini", "menu enfant". Matches set `kids_menu: true` on the record; the frontend shows a 🧒 badge, a "Kids menu" filter, and a clickable stat. Results cache by URL in `enrichment-cache`-style `kids-menu-cache.json` (gitignored).
+
+Detection is high-precision but low-recall: a tag means we found clear evidence; a missing tag just means we didn't (the menu may be a PDF/image or behind a form). `winterlic.py` preserves the tag across data refreshes.
+
+```bash
+pip install playwright && python3 -m playwright install chromium
+python3 kids_menu.py            # scrape all, cache-aware
+python3 kids_menu.py --limit 15 # smoke test
+python3 kids_menu.py --force    # ignore cache
+```
+
 ## Data source
 
 `https://secure.toronto.ca/c3api_data/v2/DataAccess.svc/Licious/map_data` — City of Toronto open data, no API key required.

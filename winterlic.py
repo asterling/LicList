@@ -174,6 +174,15 @@ def main() -> None:
                 prev = json.loads(latest_path.read_text(encoding="utf-8"))
                 prev_ai = {p.get("id"): p.get("ai") for p in prev if p.get("ai")}
                 prev_ai_count = len(prev_ai)
+                # Carry over the kids-menu tag from kids_menu.py the same way.
+                prev_kids = {p.get("id") for p in prev if p.get("kids_menu")}
+                if prev_kids:
+                    kept = 0
+                    for r in restaurants:
+                        if r.get("id") in prev_kids:
+                            r["kids_menu"] = True
+                            kept += 1
+                    print(f"Preserved kids-menu tag for {kept}/{len(prev_kids)} restaurants.")
                 if prev_ai:
                     preserved = 0
                     for r in restaurants:

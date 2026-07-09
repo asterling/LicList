@@ -504,8 +504,10 @@ header::after {
 .badge.michelin { background: #fbf0d8; color: #9a7b1e; border-color: transparent; }
 .badge.veg      { background: #e6f1ee; color: #2c7a6f; border-color: transparent; }
 .badge.new-season { background: var(--tint); color: var(--tint-text); border-color: transparent; }
+.badge.kids     { background: #e8f1fb; color: #2b6ca3; border-color: transparent; }
 
 [data-theme="dark"] .badge.michelin { background: rgba(245,158,11,0.18); color: #ffd980; }
+[data-theme="dark"] .badge.kids     { background: rgba(59,130,246,0.20); color: #a8cbf0; }
 [data-theme="dark"] .badge.veg      { background: rgba(45,212,191,0.18); color: #9bf0d2; }
 
 .description-text {
