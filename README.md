@@ -119,13 +119,13 @@ The frontend reads `ai.*` fields if present and falls back gracefully if they're
 
 ## Kids-menu tags (optional, local scrape)
 
-`kids_menu.py` flags restaurants that appear to offer a kids'/children's menu — **not** part of the Summerlicious deal, but handy for parents. It drives a headless Chromium (Playwright) to render each restaurant's website (most menus are JavaScript-rendered), follows a couple of menu/kids links, and **downloads any linked menu PDFs and reads them with `pdftotext`** (many independents publish PDF menus). It looks for phrases like "kids menu", "children's menu", "bambini", "menu enfant". Matches set `kids_menu: true` on the record; the frontend shows a 🧒 badge, a "Kids menu" filter, and a clickable stat. Results cache by URL in `kids-menu-cache.json` (gitignored).
+`kids_menu.py` flags restaurants that appear to offer a kids'/children's menu — **not** part of the Summerlicious deal, but handy for parents. It drives a headless Chromium (Playwright) to render each restaurant's website (most menus are JavaScript-rendered), follows a couple of menu/kids links, and **downloads any linked menu PDFs and reads them with `pdftotext`** (many independents publish PDF menus). Image-only PDFs and standalone menu images (jpg/png) are **OCR'd with Tesseract** (PDF pages are rendered to images via poppler's `pdftoppm` first). It looks for phrases like "kids menu", "children's menu", "bambini", "menu enfant". Matches set `kids_menu: true` on the record; the frontend shows a 🧒 badge, a "Kids menu" filter, and a clickable stat. Results cache by URL in `kids-menu-cache.json` (gitignored), including per-site menu-format diagnostics (PDFs parsed/OCR'd, image menus seen), summarized at the end of a run.
 
-Detection is high-precision but low-recall: a tag means we found clear evidence; a missing tag just means we didn't (the menu may be an image-only PDF, or gated behind a form/ordering widget). `winterlic.py` preserves the tag across data refreshes.
+Detection is high-precision but low-recall: a tag means we found clear evidence; a missing tag just means we didn't (the menu may be gated behind an ordering widget, or an image too stylized/low-res for OCR). Tags are **sticky** — a confirmed tag survives a later run that can't re-reach the site (scraping isn't deterministic), and `winterlic.py` preserves the tag across data refreshes.
 
 ```bash
 pip install playwright && python3 -m playwright install chromium
-brew install poppler   # provides pdftotext for reading PDF menus
+brew install poppler tesseract   # pdftotext/pdftoppm + OCR
 python3 kids_menu.py            # scrape all, cache-aware
 python3 kids_menu.py --limit 15 # smoke test
 python3 kids_menu.py --force    # ignore cache

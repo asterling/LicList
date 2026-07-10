@@ -39,7 +39,9 @@ from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
 
-PDFTOTEXT = shutil.which("pdftotext")  # poppler; used to read PDF menus
+PDFTOTEXT = shutil.which("pdftotext")  # poppler; reads text-layer PDF menus
+PDFTOPPM = shutil.which("pdftoppm")    # poppler; renders PDF pages to images for OCR
+TESSERACT = shutil.which("tesseract")  # OCR for image-only PDFs and menu images
 
 HERE = Path(__file__).parent
 MENUS_PATH = HERE / "menus-latest.json"
@@ -65,6 +67,7 @@ NAV_TIMEOUT = 25000       # ms
 SETTLE_MS = 1800          # let client-rendered menus populate
 MAX_FOLLOW = 4            # menu/kids sub-pages to visit if homepage misses
 MAX_PDF = 6               # menu PDFs to download + read per site
+MAX_IMAGES = 5            # menu images to OCR per site (fallback)
 
 
 def _norm_link(href: str, text: str) -> str:
@@ -91,6 +94,53 @@ def _extract_pdf_text(data: bytes) -> str:
             os.unlink(path)
         except OSError:
             pass
+
+
+def _ocr_image_bytes(data: bytes, suffix: str = ".png") -> str:
+    """OCR a single image with tesseract; returns recognized text (or '')."""
+    if not TESSERACT:
+        return ""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(data)
+        path = f.name
+    try:
+        out = subprocess.run([TESSERACT, path, "stdout", "-l", "eng"], capture_output=True, timeout=60)
+        return out.stdout.decode("utf-8", "ignore")
+    except (subprocess.SubprocessError, OSError):
+        return ""
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _ocr_pdf_bytes(data: bytes, max_pages: int = 6) -> str:
+    """Render an image-only PDF's pages to PNGs (pdftoppm) and OCR them."""
+    if not (TESSERACT and PDFTOPPM):
+        return ""
+    import tempfile as _tf
+    tmpdir = _tf.mkdtemp()
+    try:
+        pdf_path = os.path.join(tmpdir, "in.pdf")
+        with open(pdf_path, "wb") as f:
+            f.write(data)
+        try:
+            subprocess.run(
+                [PDFTOPPM, "-png", "-r", "150", "-f", "1", "-l", str(max_pages),
+                 pdf_path, os.path.join(tmpdir, "pg")],
+                capture_output=True, timeout=120,
+            )
+        except (subprocess.SubprocessError, OSError):
+            return ""
+        parts = []
+        for name in sorted(os.listdir(tmpdir)):
+            if name.startswith("pg") and name.endswith(".png"):
+                with open(os.path.join(tmpdir, name), "rb") as im:
+                    parts.append(_ocr_image_bytes(im.read()))
+        return "\n".join(parts)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
@@ -121,9 +171,36 @@ async def pdf_has_kids(context, url: str):
         return (None, "failed")
     text = await asyncio.to_thread(_extract_pdf_text, body)
     if len((text or "").strip()) < 30:
+        # No text layer — likely a scanned/image PDF. OCR the pages.
+        if TESSERACT and PDFTOPPM:
+            ocr_text = await asyncio.to_thread(_ocr_pdf_bytes, body)
+            m = KID_RE.search(ocr_text or "")
+            return (m.group(0).strip() if m else None, "ocr")
         return (None, "empty")
     m = KID_RE.search(text)
     return (m.group(0).strip() if m else None, "parsed")
+
+
+async def ocr_image_url(context, url: str):
+    """Download a menu image and OCR it. Returns (phrase_or_None, outcome)."""
+    if not TESSERACT:
+        return (None, "failed")
+    try:
+        resp = await context.request.get(url, timeout=20000)
+    except Exception:  # noqa: BLE001
+        return (None, "failed")
+    if not resp.ok:
+        return (None, "failed")
+    try:
+        body = await resp.body()
+    except Exception:  # noqa: BLE001
+        return (None, "failed")
+    if not body:
+        return (None, "failed")
+    ext = os.path.splitext(urlparse(url).path)[1].lower() or ".png"
+    text = await asyncio.to_thread(_ocr_image_bytes, body, ext)
+    m = KID_RE.search(text or "")
+    return (m.group(0).strip() if m else None, "ocr")
 
 
 async def scan_site(browser, url: str) -> dict:
@@ -133,7 +210,19 @@ async def scan_site(browser, url: str) -> dict:
     saw / parsed / found empty (image-only) / failed, and how many menu-ish
     image files the page references.
     """
-    diag = {"pdfs_seen": 0, "pdfs_parsed": 0, "pdfs_empty": 0, "pdfs_failed": 0, "image_menu_links": 0}
+    diag = {"pdfs_seen": 0, "pdfs_parsed": 0, "pdfs_empty": 0, "pdfs_failed": 0,
+            "pdfs_ocr": 0, "image_menu_links": 0, "images_ocr": 0}
+    image_menus: list[str] = []
+    seen_imgs: set[str] = set()
+
+    def add_image(u: str, hint: str):
+        if not u:
+            return
+        if urlparse(u).path.lower().endswith(IMG_EXTS) and MENU_RE.search(hint):
+            diag["image_menu_links"] += 1
+            if u not in seen_imgs:
+                seen_imgs.add(u)
+                image_menus.append(u)
 
     def finish(found, phrase, source, status):
         return {"found": found, "phrase": phrase, "source": source, "status": status, **diag}
@@ -171,8 +260,7 @@ async def scan_site(browser, url: str) -> dict:
             imgs = []
         for im in imgs:
             u = im.get("u") or ""
-            if urlparse(u).path.lower().endswith(IMG_EXTS) and MENU_RE.search(u + " " + (im.get("a") or "")):
-                diag["image_menu_links"] += 1
+            add_image(u, u + " " + (im.get("a") or ""))
 
         text = (await page.inner_text("body")) if await page.query_selector("body") else ""
         m = KID_RE.search(text or "")
@@ -191,8 +279,7 @@ async def scan_site(browser, url: str) -> dict:
                 continue
             norm = _norm_link(href, ltext)
             path = urlparse(href).path.lower()
-            if path.endswith(IMG_EXTS) and MENU_RE.search(norm):
-                diag["image_menu_links"] += 1
+            add_image(href, norm)
             if KID_RE.search(norm):
                 return finish(True, (ltext or href)[:60], base, "ok-link")
             if path.endswith(".pdf"):
@@ -250,8 +337,28 @@ async def scan_site(browser, url: str) -> dict:
                     checked_pdfs += 1
                     if phrase:
                         return finish(True, phrase, h, "ok-pdf-page")
+                # Menu pages are often just images — collect them for OCR.
+                subimgs = await page.eval_on_selector_all(
+                    "img", "els => els.map(e => ({u: e.currentSrc||e.src||'', a: (e.alt||'').trim()}))"
+                )
+                for im in subimgs:
+                    u = im.get("u") or ""
+                    add_image(u, u + " " + (im.get("a") or ""))
             except Exception:  # noqa: BLE001
                 continue
+
+        # Last resort: OCR menu images (kid/child-named first).
+        if TESSERACT and image_menus:
+            image_menus.sort(key=lambda u: 0 if re.search(r"kid|child", u, re.I) else 1)
+            checked_imgs = 0
+            for iu in image_menus:
+                if checked_imgs >= MAX_IMAGES:
+                    break
+                diag["images_ocr"] += 1
+                phrase, _ = await ocr_image_url(page.context, iu)
+                checked_imgs += 1
+                if phrase:
+                    return finish(True, phrase, iu, "ok-image-ocr")
 
         return finish(False, "", base, "not-found")
     finally:
@@ -355,17 +462,15 @@ def main() -> None:
     parsed = sum(v.get("pdfs_parsed", 0) for v in rows)
     empty = sum(v.get("pdfs_empty", 0) for v in rows)
     failed = sum(v.get("pdfs_failed", 0) for v in rows)
-    sites_with_empty_pdf = sum(1 for v in rows if v.get("pdfs_empty", 0) and not v.get("found"))
+    pdf_ocr = sum(v.get("pdfs_ocr", 0) for v in rows)
+    img_ocr = sum(v.get("images_ocr", 0) for v in rows)
+    ocr_status_hits = sum(1 for v in rows if v.get("status") == "ok-image-ocr")
     sites_with_img_menu = sum(1 for v in rows if v.get("image_menu_links", 0))
-    sites_img_only_unfound = sum(
-        1 for v in rows
-        if not v.get("found") and (v.get("pdfs_empty", 0) or v.get("image_menu_links", 0))
-    )
     print("\nMenu-format diagnostics:")
-    print(f"  PDFs downloaded: {seen}  (parsed: {parsed}, image-only/empty: {empty}, failed: {failed})")
-    print(f"  Sites with an image-only PDF menu (and otherwise untagged): {sites_with_empty_pdf}")
+    print(f"  PDFs downloaded: {seen}  (text-parsed: {parsed}, image-only→OCR: {empty + pdf_ocr}, failed: {failed})")
+    print(f"  OCR runs: {pdf_ocr} image-only PDFs, {img_ocr} menu images")
+    print(f"  Tags from image OCR: {ocr_status_hits}")
     print(f"  Sites referencing menu image files (jpg/png/etc.): {sites_with_img_menu}")
-    print(f"  Untagged sites whose menu looks image-based (empty PDF or image links): {sites_img_only_unfound}")
 
 
 if __name__ == "__main__":
