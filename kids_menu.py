@@ -27,13 +27,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import async_playwright
+
+PDFTOTEXT = shutil.which("pdftotext")  # poppler; used to read PDF menus
 
 HERE = Path(__file__).parent
 MENUS_PATH = HERE / "menus-latest.json"
@@ -58,10 +64,55 @@ FOLLOW_HINT_RE = re.compile(r"kid|child|bambini|enfant|menu|dining|food", re.I)
 NAV_TIMEOUT = 25000       # ms
 SETTLE_MS = 1800          # let client-rendered menus populate
 MAX_FOLLOW = 4            # menu/kids sub-pages to visit if homepage misses
+MAX_PDF = 6               # menu PDFs to download + read per site
 
 
 def _norm_link(href: str, text: str) -> str:
     return re.sub(r"[-_/]", " ", href or "") + " " + (text or "")
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    """Run pdftotext on PDF bytes and return the text (empty on failure)."""
+    if not PDFTOTEXT:
+        return ""
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        f.write(data)
+        path = f.name
+    try:
+        out = subprocess.run(
+            [PDFTOTEXT, "-q", "-nopgbrk", path, "-"],
+            capture_output=True, timeout=30,
+        )
+        return out.stdout.decode("utf-8", "ignore")
+    except (subprocess.SubprocessError, OSError):
+        return ""
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+async def pdf_has_kids(context, url: str):
+    """Download a PDF (via the browser session) and look for a kids-menu phrase.
+    Returns the matched phrase, or None."""
+    if not PDFTOTEXT:
+        return None
+    try:
+        resp = await context.request.get(url, timeout=20000)
+    except Exception:  # noqa: BLE001
+        return None
+    if not resp.ok:
+        return None
+    try:
+        body = await resp.body()
+    except Exception:  # noqa: BLE001
+        return None
+    if not body or not body[:5].startswith(b"%PDF"):
+        return None
+    text = await asyncio.to_thread(_extract_pdf_text, body)
+    m = KID_RE.search(text or "")
+    return m.group(0).strip() if m else None
 
 
 async def scan_site(browser, url: str) -> dict:
@@ -92,17 +143,34 @@ async def scan_site(browser, url: str) -> dict:
             "a[href]", "els => els.map(e => ({href: e.href, text: (e.innerText||'').trim()}))"
         )
         follow: list[str] = []
+        pdfs: list[str] = []
+        seen_pdfs: set[str] = set()
         for l in links:
             href, ltext = l.get("href") or "", l.get("text") or ""
             if not href or href.startswith(("mailto:", "tel:", "javascript:")):
                 continue
-            if KID_RE.search(_norm_link(href, ltext)):
+            norm = _norm_link(href, ltext)
+            if KID_RE.search(norm):
                 return {"found": True, "phrase": (ltext or href)[:60], "source": base, "status": "ok-link"}
-            if urlparse(href).netloc == base_host and FOLLOW_HINT_RE.search(_norm_link(href, ltext)):
+            if urlparse(href).path.lower().endswith(".pdf"):
+                if FOLLOW_HINT_RE.search(norm) and href not in seen_pdfs:
+                    seen_pdfs.add(href)
+                    pdfs.append(href)
+            elif urlparse(href).netloc == base_host and FOLLOW_HINT_RE.search(norm):
                 if href != base and href not in follow:
                     follow.append(href)
 
-        # Visit the most promising links first: kid/child pages, then menu pages.
+        checked_pdfs = 0
+        # Menu PDFs are a strong signal — read them first.
+        for pdf in pdfs:
+            if checked_pdfs >= MAX_PDF:
+                break
+            phrase = await pdf_has_kids(page.context, pdf)
+            checked_pdfs += 1
+            if phrase:
+                return {"found": True, "phrase": phrase, "source": pdf, "status": "ok-pdf"}
+
+        # Visit the most promising HTML links: kid/child pages, then menu pages.
         def _rank(h: str) -> int:
             if re.search(r"kid|child|bambini|enfant", h, re.I):
                 return 0
@@ -119,6 +187,25 @@ async def scan_site(browser, url: str) -> dict:
                 m2 = KID_RE.search(ptext or "")
                 if m2:
                     return {"found": True, "phrase": m2.group(0).strip(), "source": link, "status": "ok-page"}
+                # Menu pages often link a PDF menu — grab any new ones.
+                sublinks = await page.eval_on_selector_all(
+                    "a[href*='.pdf']", "els => els.map(e => ({href: e.href, text: (e.innerText||'').trim()}))"
+                )
+                for sl in sublinks:
+                    if checked_pdfs >= MAX_PDF:
+                        break
+                    h, tx = sl.get("href") or "", sl.get("text") or ""
+                    if not urlparse(h).path.lower().endswith(".pdf") or h in seen_pdfs:
+                        continue
+                    if not FOLLOW_HINT_RE.search(_norm_link(h, tx)):
+                        continue
+                    seen_pdfs.add(h)
+                    if KID_RE.search(_norm_link(h, tx)):
+                        return {"found": True, "phrase": (tx or h)[:60], "source": link, "status": "ok-link-pdf"}
+                    phrase = await pdf_has_kids(page.context, h)
+                    checked_pdfs += 1
+                    if phrase:
+                        return {"found": True, "phrase": phrase, "source": h, "status": "ok-pdf-page"}
             except Exception:  # noqa: BLE001
                 continue
 
