@@ -93,37 +93,65 @@ def _extract_pdf_text(data: bytes) -> str:
             pass
 
 
+IMG_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
+MENU_RE = re.compile(r"menu", re.I)
+
+
 async def pdf_has_kids(context, url: str):
-    """Download a PDF (via the browser session) and look for a kids-menu phrase.
-    Returns the matched phrase, or None."""
+    """Download a PDF (via the browser session) and check for a kids-menu phrase.
+
+    Returns (phrase_or_None, outcome) where outcome is:
+      - 'parsed' : got a real text layer (whether or not kids matched)
+      - 'empty'  : valid PDF but ~no extractable text (likely image-only/scanned)
+      - 'failed' : download error, non-200, not a PDF, or pdftotext error
+    """
     if not PDFTOTEXT:
-        return None
+        return (None, "failed")
     try:
         resp = await context.request.get(url, timeout=20000)
     except Exception:  # noqa: BLE001
-        return None
+        return (None, "failed")
     if not resp.ok:
-        return None
+        return (None, "failed")
     try:
         body = await resp.body()
     except Exception:  # noqa: BLE001
-        return None
+        return (None, "failed")
     if not body or not body[:5].startswith(b"%PDF"):
-        return None
+        return (None, "failed")
     text = await asyncio.to_thread(_extract_pdf_text, body)
-    m = KID_RE.search(text or "")
-    return m.group(0).strip() if m else None
+    if len((text or "").strip()) < 30:
+        return (None, "empty")
+    m = KID_RE.search(text)
+    return (m.group(0).strip() if m else None, "parsed")
 
 
 async def scan_site(browser, url: str) -> dict:
-    """Render the site (and a few menu links) and look for a kids menu."""
+    """Render the site (and a few menu links) and look for a kids menu.
+
+    The returned dict also carries per-site diagnostics: how many menu PDFs we
+    saw / parsed / found empty (image-only) / failed, and how many menu-ish
+    image files the page references.
+    """
+    diag = {"pdfs_seen": 0, "pdfs_parsed": 0, "pdfs_empty": 0, "pdfs_failed": 0, "image_menu_links": 0}
+
+    def finish(found, phrase, source, status):
+        return {"found": found, "phrase": phrase, "source": source, "status": status, **diag}
+
+    async def check_pdf(context, href):
+        """Download+parse a PDF, tallying diagnostics. Returns matched phrase or None."""
+        diag["pdfs_seen"] += 1
+        phrase, outcome = await pdf_has_kids(context, href)
+        diag["pdfs_" + outcome] += 1
+        return phrase
+
     page = await browser.new_page(user_agent=UA)
     page.set_default_timeout(8000)
     try:
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT)
         except Exception as e:  # noqa: BLE001
-            return {"found": False, "phrase": "", "source": url, "status": f"nav-err {type(e).__name__}"}
+            return finish(False, "", url, f"nav-err {type(e).__name__}")
         await page.wait_for_timeout(SETTLE_MS)
         try:
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
@@ -134,10 +162,22 @@ async def scan_site(browser, url: str) -> dict:
         base = page.url
         base_host = urlparse(base).netloc
 
+        # Count menu-ish image files referenced (heuristic for image-based menus).
+        try:
+            imgs = await page.eval_on_selector_all(
+                "img", "els => els.map(e => ({u: e.currentSrc||e.src||'', a: (e.alt||'').trim()}))"
+            )
+        except Exception:  # noqa: BLE001
+            imgs = []
+        for im in imgs:
+            u = im.get("u") or ""
+            if urlparse(u).path.lower().endswith(IMG_EXTS) and MENU_RE.search(u + " " + (im.get("a") or "")):
+                diag["image_menu_links"] += 1
+
         text = (await page.inner_text("body")) if await page.query_selector("body") else ""
         m = KID_RE.search(text or "")
         if m:
-            return {"found": True, "phrase": m.group(0).strip(), "source": base, "status": "ok"}
+            return finish(True, m.group(0).strip(), base, "ok")
 
         links = await page.eval_on_selector_all(
             "a[href]", "els => els.map(e => ({href: e.href, text: (e.innerText||'').trim()}))"
@@ -150,9 +190,12 @@ async def scan_site(browser, url: str) -> dict:
             if not href or href.startswith(("mailto:", "tel:", "javascript:")):
                 continue
             norm = _norm_link(href, ltext)
+            path = urlparse(href).path.lower()
+            if path.endswith(IMG_EXTS) and MENU_RE.search(norm):
+                diag["image_menu_links"] += 1
             if KID_RE.search(norm):
-                return {"found": True, "phrase": (ltext or href)[:60], "source": base, "status": "ok-link"}
-            if urlparse(href).path.lower().endswith(".pdf"):
+                return finish(True, (ltext or href)[:60], base, "ok-link")
+            if path.endswith(".pdf"):
                 if FOLLOW_HINT_RE.search(norm) and href not in seen_pdfs:
                     seen_pdfs.add(href)
                     pdfs.append(href)
@@ -165,10 +208,10 @@ async def scan_site(browser, url: str) -> dict:
         for pdf in pdfs:
             if checked_pdfs >= MAX_PDF:
                 break
-            phrase = await pdf_has_kids(page.context, pdf)
+            phrase = await check_pdf(page.context, pdf)
             checked_pdfs += 1
             if phrase:
-                return {"found": True, "phrase": phrase, "source": pdf, "status": "ok-pdf"}
+                return finish(True, phrase, pdf, "ok-pdf")
 
         # Visit the most promising HTML links: kid/child pages, then menu pages.
         def _rank(h: str) -> int:
@@ -186,7 +229,7 @@ async def scan_site(browser, url: str) -> dict:
                 ptext = (await page.inner_text("body")) if await page.query_selector("body") else ""
                 m2 = KID_RE.search(ptext or "")
                 if m2:
-                    return {"found": True, "phrase": m2.group(0).strip(), "source": link, "status": "ok-page"}
+                    return finish(True, m2.group(0).strip(), link, "ok-page")
                 # Menu pages often link a PDF menu — grab any new ones.
                 sublinks = await page.eval_on_selector_all(
                     "a[href*='.pdf']", "els => els.map(e => ({href: e.href, text: (e.innerText||'').trim()}))"
@@ -201,15 +244,16 @@ async def scan_site(browser, url: str) -> dict:
                         continue
                     seen_pdfs.add(h)
                     if KID_RE.search(_norm_link(h, tx)):
-                        return {"found": True, "phrase": (tx or h)[:60], "source": link, "status": "ok-link-pdf"}
-                    phrase = await pdf_has_kids(page.context, h)
+                        diag["pdfs_seen"] += 1
+                        return finish(True, (tx or h)[:60], link, "ok-link-pdf")
+                    phrase = await check_pdf(page.context, h)
                     checked_pdfs += 1
                     if phrase:
-                        return {"found": True, "phrase": phrase, "source": h, "status": "ok-pdf-page"}
+                        return finish(True, phrase, h, "ok-pdf-page")
             except Exception:  # noqa: BLE001
                 continue
 
-        return {"found": False, "phrase": "", "source": base, "status": "not-found"}
+        return finish(False, "", base, "not-found")
     finally:
         await page.close()
 
@@ -283,11 +327,14 @@ def main() -> None:
     if todo:
         asyncio.run(run(todo, cache, args.workers))
 
+    # Sticky: detection is high-precision, so a prior confirmed tag is trusted
+    # even if this run came back "not found" (usually a transient timeout).
+    # Scraping isn't perfectly deterministic, and kids menus don't disappear.
     found = 0
     for r in restaurants:
         site = (r.get("website") or "").strip()
         hit = cache.get(site)
-        if hit and hit.get("found"):
+        if (hit and hit.get("found")) or r.get("kids_menu") is True:
             r["kids_menu"] = True
             found += 1
         else:
@@ -300,6 +347,25 @@ def main() -> None:
         archive.write_bytes(MENUS_PATH.read_bytes())
 
     print(f"\nDone. Tagged {found} restaurants with a kids menu (of {len(targets)} checked).")
+
+    # Aggregate diagnostics across the sites we just have cached.
+    target_sites = {(r.get("website") or "").strip() for r in targets}
+    rows = [v for k, v in cache.items() if k in target_sites]
+    seen = sum(v.get("pdfs_seen", 0) for v in rows)
+    parsed = sum(v.get("pdfs_parsed", 0) for v in rows)
+    empty = sum(v.get("pdfs_empty", 0) for v in rows)
+    failed = sum(v.get("pdfs_failed", 0) for v in rows)
+    sites_with_empty_pdf = sum(1 for v in rows if v.get("pdfs_empty", 0) and not v.get("found"))
+    sites_with_img_menu = sum(1 for v in rows if v.get("image_menu_links", 0))
+    sites_img_only_unfound = sum(
+        1 for v in rows
+        if not v.get("found") and (v.get("pdfs_empty", 0) or v.get("image_menu_links", 0))
+    )
+    print("\nMenu-format diagnostics:")
+    print(f"  PDFs downloaded: {seen}  (parsed: {parsed}, image-only/empty: {empty}, failed: {failed})")
+    print(f"  Sites with an image-only PDF menu (and otherwise untagged): {sites_with_empty_pdf}")
+    print(f"  Sites referencing menu image files (jpg/png/etc.): {sites_with_img_menu}")
+    print(f"  Untagged sites whose menu looks image-based (empty PDF or image links): {sites_img_only_unfound}")
 
 
 if __name__ == "__main__":
